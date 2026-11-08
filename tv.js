@@ -32,6 +32,7 @@
     return node;
   }
   function show(title, previous) {
+    document.body.classList.remove('tv-fullscreen');
     if (stopPlayer) {
       stopPlayer();
       stopPlayer = null;
@@ -94,6 +95,18 @@
       key = application.value.trim();
       localStorage.setItem('yummy.key', key);
       message(key ? 'Ключ сохранён.' : 'Ключ удалён.');
+    });
+    var resolver = input('Сервер видео (необязательно)', localStorage.getItem('yummy.resolver') || '');
+    resolver.placeholder = 'http://192.168.0.166:8791';
+    button(screen, 'Сохранить сервер видео', function () {
+      var value = resolver.value.trim().replace(/\/+$/, '');
+      try {
+        var address = value && new URL(value);
+        if (address && (!/^https?:$/.test(address.protocol) || address.username || address.password ||
+            address.search || address.hash || address.pathname !== '/')) throw new Error();
+      } catch (error) { return message('Введи адрес сервера в формате http://адрес:порт.'); }
+      localStorage.setItem('yummy.resolver', value);
+      message(value ? 'Сервер видео сохранён.' : 'Сервер видео отключён.');
     });
     if (token) {
       var profile = add(screen, 'p', 'Вход выполнен.');
@@ -268,8 +281,8 @@
     }
     return '';
   }
-  function play(anime, source, previous, resume) {
-    var url = sourceUrl(source);
+  function play(anime, source, previous, resume, resolved) {
+    var url = resolved || sourceUrl(source);
     var current = show(anime.title + ' · серия ' + source.number, previous);
     button(screen, 'Другой источник / к сериям', previous);
     if (!url) {
@@ -277,7 +290,33 @@
       focus();
       return;
     }
-    var direct = /\.(m3u8|mp4|mpd|webm)(?:[?#]|$)/i.test(url);
+    var direct = resolved || /\.(m3u8|mp4|mpd|webm)(?:[?#]|$)/i.test(url);
+    var resolverBase = localStorage.getItem('yummy.resolver');
+    if (!direct && resolved !== false && resolverBase && /(^|\.)(alloha\.yani\.tv|aksor\.tv|kodikplayer\.com|kodik\.info)$/i.test(new URL(url).hostname)) {
+      var request = new XMLHttpRequest();
+      request.open('GET', resolverBase + '/resolve?url=' + encodeURIComponent(url));
+      request.timeout = 45000;
+      message('Ищу прямой поток…');
+      function failed() {
+        if (page !== current) return;
+        message('Сервер не нашёл прямой поток.');
+        button(screen, 'Открыть встроенный плеер', function () {
+          play(anime, source, previous, resume, false);
+        }).focus();
+      }
+      request.onload = function () {
+        if (page !== current) return;
+        try {
+          var stream = JSON.parse(request.responseText).url;
+          if (request.status !== 200 || !/^https?:\/\//i.test(stream)) return failed();
+          play(anime, source, previous, resume, stream);
+        } catch (error) { failed(); }
+      };
+      request.onerror = request.ontimeout = failed;
+      request.send();
+      focus();
+      return;
+    }
     var saved = 0;
     var busy = false;
     var queued = null;
@@ -369,6 +408,13 @@
       var video = add(screen, 'video');
       video.controls = true;
       video.src = url;
+      var playbackButton = button(screen, 'Воспроизвести / пауза', function () {
+        if (!video.paused) return video.pause();
+        var attempt = video.play();
+        if (attempt && attempt.catch) attempt.catch(function () { message('Телевизор не смог запустить поток.'); });
+      });
+      screen.insertBefore(playbackButton, video);
+      addFullscreen(video, playbackButton.onclick);
       video.onloadedmetadata = function () {
         if (resume && resume < video.duration) video.currentTime = resume;
       };
@@ -427,15 +473,40 @@
       frame.setAttribute('allow', 'autoplay; fullscreen; encrypted-media');
       frame.setAttribute('allowfullscreen', '');
       frame.setAttribute('tabindex', '-1');
+      addFullscreen(frame, kodik ? start.onclick : null);
       if (kodik) window.addEventListener('message', playerEvent);
-      stopPlayer = function () { window.removeEventListener('message', playerEvent); };
+      stopPlayer = function () {
+        document.body.classList.remove('tv-fullscreen');
+        window.removeEventListener('message', playerEvent);
+      };
       openFrame();
       start.focus();
       return;
     }
     focus();
   }
+  function addFullscreen(media, playback) {
+    var controls = add(screen, 'div');
+    controls.className = 'fullscreen-controls';
+    var exit = button(controls, 'Выйти из полноэкранного режима', leave);
+    if (playback) button(controls, 'Воспроизвести / пауза', playback);
+    function leave() {
+      document.body.classList.remove('tv-fullscreen');
+      toggle.focus();
+    }
+    var toggle = button(screen, 'На весь экран', function () {
+      document.body.classList.add('tv-fullscreen');
+      exit.focus();
+    });
+    screen.insertBefore(toggle, media);
+    media.classList.add('fullscreen-media');
+  }
   function goBack() {
+    if (document.body.classList.contains('tv-fullscreen')) {
+      var exit = screen.querySelector('.fullscreen-controls button');
+      if (exit) exit.click();
+      return;
+    }
     if (back) back();
     else if (window.tizen) tizen.application.getCurrentApplication().exit();
   }
@@ -461,14 +532,16 @@
     }
     if ((active.tagName === 'INPUT' && event.keyCode % 2) ||
         ((active.tagName === 'SELECT' || active.tagName === 'VIDEO') && event.keyCode % 2)) return;
-    var targets = document.querySelectorAll('button:not([disabled]),input,select,video');
+    var selector = document.body.classList.contains('tv-fullscreen')
+      ? '.fullscreen-controls button' : 'button:not([disabled]),input,select,video';
+    var targets = document.querySelectorAll(selector);
     var origin = active.getBoundingClientRect();
     var best;
     var bestScore = Infinity;
     var horizontal = event.keyCode % 2;
     var direction = event.keyCode <= 38 ? -1 : 1;
     for (var i = 0; i < targets.length; i++) {
-      if (targets[i] === active) continue;
+      if (targets[i] === active || !targets[i].getClientRects().length) continue;
       var rect = targets[i].getBoundingClientRect();
       var dx = (rect.left + rect.right - origin.left - origin.right) / 2;
       var dy = (rect.top + rect.bottom - origin.top - origin.bottom) / 2;
