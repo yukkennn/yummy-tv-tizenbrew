@@ -248,12 +248,29 @@
     focus();
   }
   function now() { return Math.floor(Date.now() / 1000); }
+  function sourceUrl(source) {
+    var data = source.data || {};
+    if (typeof data === 'string') {
+      try { data = JSON.parse(data) || {}; }
+      catch (error) { data = {}; }
+    }
+    var candidates = [source.yani_stream_url, data.yani_stream_url, source.iframe_url,
+      source.url, source.player_url, source.link, data.iframe_url, data.url, data.player_url, data.link];
+    for (var i = 0; i < candidates.length; i++) {
+      if (typeof candidates[i] !== 'string') continue;
+      var url = candidates[i].trim();
+      if (url.indexOf('//') === 0) url = 'https:' + url;
+      if (/^http:\/\/(?:www\.)?kodik\./i.test(url)) url = 'https://' + url.slice(7);
+      if (/^https?:\/\/[^\/\s?#]+/i.test(url)) return url;
+    }
+    return '';
+  }
   function play(anime, source, previous, resume) {
-    var url = source.iframe_url || '';
+    var url = sourceUrl(source);
     var current = show(anime.title + ' · серия ' + source.number, previous);
     button(screen, 'Назад к сериям', previous);
-    if (!/^https:\/\//i.test(url)) {
-      message('Источник не предоставил ссылку HTTPS.');
+    if (!url) {
+      message('У этого источника нет ссылки на плеер. Попробуй другую озвучку или источник.');
       focus();
       return;
     }
