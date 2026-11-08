@@ -1,0 +1,7 @@
+{
+  "name": "yummy-tv",
+  "version": "1.0.0",
+  "packageType": "app",
+  "appName": "Yummy TV",
+  "appPath": "index.html"
+}
