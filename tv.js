@@ -96,18 +96,6 @@
       localStorage.setItem('yummy.key', key);
       message(key ? 'Ключ сохранён.' : 'Ключ удалён.');
     });
-    var resolver = input('Сервер видео (необязательно)', localStorage.getItem('yummy.resolver') || '');
-    resolver.placeholder = 'http://192.168.0.166:8791';
-    button(screen, 'Сохранить сервер видео', function () {
-      var value = resolver.value.trim().replace(/\/+$/, '');
-      try {
-        var address = value && new URL(value);
-        if (address && (!/^https?:$/.test(address.protocol) || address.username || address.password ||
-            address.search || address.hash || address.pathname !== '/')) throw new Error();
-      } catch (error) { return message('Введи адрес сервера в формате http://адрес:порт.'); }
-      localStorage.setItem('yummy.resolver', value);
-      message(value ? 'Сервер видео сохранён.' : 'Сервер видео отключён.');
-    });
     if (token) {
       var profile = add(screen, 'p', 'Вход выполнен.');
       api('/profile', 'GET', null, true).then(function (user) {
@@ -291,15 +279,14 @@
       return;
     }
     var direct = resolved || /\.(m3u8|mp4|mpd|webm)(?:[?#]|$)/i.test(url);
-    var resolverBase = localStorage.getItem('yummy.resolver');
-    if (!direct && resolved !== false && resolverBase && /(^|\.)(alloha\.yani\.tv|aksor\.tv|kodikplayer\.com|kodik\.info)$/i.test(new URL(url).hostname)) {
+    if (!direct && resolved !== false && new URL(url).hostname === 'player.aksor.tv') {
       var request = new XMLHttpRequest();
-      request.open('GET', resolverBase + '/resolve?url=' + encodeURIComponent(url));
-      request.timeout = 45000;
+      request.open('GET', 'http://127.0.0.1:8791/resolve?url=' + encodeURIComponent(url));
+      request.timeout = 12000;
       message('Ищу прямой поток…');
       function failed() {
         if (page !== current) return;
-        message('Сервер не нашёл прямой поток.');
+        message('Телевизор не смог получить прямой поток Aksor.');
         button(screen, 'Открыть встроенный плеер', function () {
           play(anime, source, previous, resume, false);
         }).focus();

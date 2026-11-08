@@ -1,7 +1,8 @@
 {
   "name": "yummy-tv",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "packageType": "app",
   "appName": "Yummy TV",
-  "appPath": "index.html"
+  "appPath": "index.html",
+  "serviceFile": "service.js"
 }
