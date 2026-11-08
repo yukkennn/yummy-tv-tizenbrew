@@ -189,7 +189,7 @@
     });
     focus();
   }
-  function detail(anime, previous, watch) {
+  function detail(anime, previous, watch, selectedEpisode) {
     show(anime.title || 'Аниме', previous);
     var path = '/anime/' + anime.anime_id;
     if (anime.description) add(screen, 'p', anime.description.replace(/<[^>]*>/g, ''));
@@ -233,7 +233,8 @@
         groups[episode.value].forEach(function (video) {
           var data = video.data || {};
           button(sources, (data.dubbing || 'Озвучка') + ' · ' + (data.player || 'Плеер'), function () {
-            play(anime, video, function () { detail(anime, previous, watch); },
+            var selected = episode.value;
+            play(anime, video, function () { detail(anime, previous, watch, selected); },
               watch && watch.video_id === video.video_id && watch.end_time < watch.duration - 10 ? watch.end_time : 0);
           }, 'row');
         });
@@ -242,8 +243,10 @@
         var matching = videos.filter(function (video) { return video.video_id === watch.video_id; })[0];
         if (matching) episode.value = String(matching.number || matching.index || '—');
       }
+      if (selectedEpisode && groups[selectedEpisode]) episode.value = selectedEpisode;
       episode.onchange = renderSources;
       renderSources();
+      episode.focus();
     });
     focus();
   }
@@ -268,7 +271,7 @@
   function play(anime, source, previous, resume) {
     var url = sourceUrl(source);
     var current = show(anime.title + ' · серия ' + source.number, previous);
-    button(screen, 'Назад к сериям', previous);
+    button(screen, 'Другой источник / к сериям', previous);
     if (!url) {
       message('У этого источника нет ссылки на плеер. Попробуй другую озвучку или источник.');
       focus();
@@ -383,17 +386,52 @@
       var pending = video.play();
       if (pending && pending.catch) pending.catch(function () { if (page === current) message('Нажми Play в плеере.'); });
     } else {
-      var frame = add(screen, 'iframe');
-      frame.title = 'Плеер источника';
-      frame.setAttribute('allowfullscreen', '');
-      frame.setAttribute('tabindex', '0');
-      frame.src = url;
+      var target = new URL(url);
+      var kodik = /(^|\.)kodik(?:player|info)?\./i.test(target.hostname);
+      if (/(^|\.)alloha\.yani\.tv$/i.test(target.hostname)) {
+        target.searchParams.set('autoplay', '1');
+        target = new URL('https://yummyanime.github.io/yummy-lampa-plugin/embed/alloha.html?url=' +
+          encodeURIComponent(target.href));
+      }
+      var frame;
+      var playing = false;
+      function openFrame() {
+        frame.src = target.href;
+        message('Если видео не началось, попробуй «Другой источник / к сериям».');
+      }
+      function playerEvent(event) {
+        if (event.source !== frame.contentWindow || event.origin !== target.origin || !event.data) return;
+        if (event.data.key === 'kodik_player_play') {
+          playing = true;
+          message('');
+        } else if (event.data.key === 'kodik_player_pause' || event.data.key === 'kodik_player_end') {
+          playing = false;
+        }
+      }
+      var start = button(screen, kodik ? 'Воспроизвести / пауза' : 'Перейти в плеер', function () {
+        if (kodik) {
+          frame.contentWindow.postMessage({key: 'kodik_player_api', value: {method: playing ? 'pause' : 'play'}}, target.origin);
+        } else {
+          frame.focus();
+          frame.contentWindow.focus();
+        }
+      });
+      button(screen, 'Перезагрузить плеер', openFrame);
       button(screen, 'Отметить серию просмотренной', function () {
         var duration = Number(source.duration) || 0;
         if (!duration) return message('Источник не указал длительность, отметка недоступна.');
         sync(duration, duration, true);
       });
-      message('Встроенный плеер. По окончании можно сохранить просмотр кнопкой под видео.');
+      frame = add(screen, 'iframe');
+      frame.title = 'Плеер источника';
+      frame.setAttribute('allow', 'autoplay; fullscreen; encrypted-media');
+      frame.setAttribute('allowfullscreen', '');
+      frame.setAttribute('tabindex', '-1');
+      if (kodik) window.addEventListener('message', playerEvent);
+      stopPlayer = function () { window.removeEventListener('message', playerEvent); };
+      openFrame();
+      start.focus();
+      return;
     }
     focus();
   }
@@ -412,9 +450,18 @@
     }
     if (event.keyCode < 37 || event.keyCode > 40) return;
     var active = document.activeElement;
+    if (active.tagName === 'SELECT' && event.keyCode % 2 && active.options.length) {
+      var index = Math.max(0, Math.min(active.options.length - 1, active.selectedIndex + (event.keyCode === 37 ? -1 : 1)));
+      if (index !== active.selectedIndex) {
+        active.selectedIndex = index;
+        active.dispatchEvent(new Event('change'));
+      }
+      event.preventDefault();
+      return;
+    }
     if ((active.tagName === 'INPUT' && event.keyCode % 2) ||
         ((active.tagName === 'SELECT' || active.tagName === 'VIDEO') && event.keyCode % 2)) return;
-    var targets = document.querySelectorAll('button:not([disabled]),input,select,video,iframe');
+    var targets = document.querySelectorAll('button:not([disabled]),input,select,video');
     var origin = active.getBoundingClientRect();
     var best;
     var bestScore = Infinity;
